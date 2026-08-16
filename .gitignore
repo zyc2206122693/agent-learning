@@ -1,0 +1,6 @@
+# 敏感配置：API 密钥，勿入库
+config.json
+
+# Python
+__pycache__/
+*.pyc

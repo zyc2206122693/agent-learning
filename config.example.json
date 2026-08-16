@@ -1,0 +1,8 @@
+{
+  "api_key": "sk-xxxx  替换为你的 DeepSeek key",
+  "base_url": "https://api.deepseek.com/anthropic",
+  "model": "deepseek-chat",
+  "use_llm": true,
+  "news_llm_classify": false,
+  "timeout_seconds": 30
+}
