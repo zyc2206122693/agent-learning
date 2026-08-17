@@ -272,11 +272,34 @@ class MockLLM:
                 related.append(label)
         return {"category": category, "sentiment": sentiment, "related": related}
 
+    @staticmethod
+    def _has_tool_result(messages: List[Dict[str, Any]]) -> bool:
+        """对话里是否已存在 tool_result（即已执行过一轮工具）。"""
+        for m in messages:
+            c = m.get("content")
+            if isinstance(c, list):
+                for b in c:
+                    if isinstance(b, dict) and b.get("type") == "tool_result":
+                        return True
+        return False
+
     def complete(self, **kwargs):
-        """返回一个与 Anthropic 响应同构的 dict，含一个 tool_use block。"""
+        """返回一个与 Anthropic 响应同构的 dict。
+
+        模拟真实 Agent 行为：第一轮返回一个 tool_use（调用第一个工具），
+        一旦收到 tool_result 就返回 text（模拟"拿到结果后作答"），从而让
+        离线 demo 能正常收敛，而不是无限空转。
+        """
         tools = kwargs.get("tools") or []
-        user_text = self._last_user_text(kwargs.get("messages") or [])
-        # 找到要演示的分类工具（约定名带 classify / classify_news）
+        messages = kwargs.get("messages") or []
+        user_text = self._last_user_text(messages)
+        # 已执行过工具 → 模拟模型拿到结果后直接作答，结束循环
+        if self._has_tool_result(messages):
+            return {
+                "content": [{"type": "text", "text": f"(mock) 已根据工具结果作答：关于“{user_text[:40]}”。离线演示模式，真实分类/回答请用真实模型。"}],
+                "stop_reason": "end_turn",
+            }
+        # 找到要演示的分类工具（约定名带 classify / classify_news），否则取第一个工具
         target = None
         for t in tools:
             if "classify" in t.get("name", ""):
@@ -286,13 +309,36 @@ class MockLLM:
             target = tools[0] if tools else None
         if target is None:
             return {"content": [{"type": "text", "text": "mock: 无工具"}]}
-        tool_input = self._classify_heuristic(user_text)
+        # 分类工具用启发式填枚举；其他工具按 schema 填合法参数，保证离线能真实执行
+        if "classify" in target.get("name", ""):
+            tool_input = self._classify_heuristic(user_text)
+        else:
+            tool_input = self._mock_args(target)
         return {
             "content": [
                 {"type": "tool_use", "id": "mock_tool_use_1", "name": target["name"], "input": tool_input},
             ],
             "stop_reason": "tool_use",
         }
+
+    @staticmethod
+    def _mock_args(tool_def: Dict[str, Any]) -> Dict[str, Any]:
+        """按工具 input_schema 的 required 生成合法示例参数，让 mock 能真实执行工具。"""
+        schema = tool_def.get("input_schema") or {}
+        required = schema.get("required", [])
+        props = schema.get("properties", {})
+        args = {}
+        for name in required:
+            p = props.get(name, {})
+            if p.get("enum"):
+                args[name] = p["enum"][0]
+            elif p.get("type") == "integer":
+                args[name] = 1
+            elif p.get("type") == "number":
+                args[name] = 1.0
+            else:
+                args[name] = "x"
+        return args
 
     def run_tool_loop(self, registry, system=None, messages=None, **kwargs):
         """为 mock 提供与 LLMClient 相同的接口，驱动工具循环。"""
