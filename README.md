@@ -10,6 +10,8 @@
 | `llm_client.py` | 裸 HTTP 调 DeepSeek **Anthropic 兼容接口**（零依赖）；`run_tool_loop` 编排循环骨架；离线 `MockLLM` 兜底 |
 | `news_classifier.py` | 用 `tool_choice` 强制"分类工具"做结构化输出，替换正则分类；真模型→mock→正则三级兜底 |
 | `demo_classify.py` | 正则 vs LLM 分类对比演示 |
+| `investment_assistant.py` | 第2课：投资助理（真数据工具 + auto 自主编排） |
+| `agent学习笔记_day2_投资助理.md` | 第 2 天学习笔记 |
 | `agent学习笔记_day1_工具调用.md` | 第 1 天学习笔记（含面试题卡） |
 
 ## 运行
