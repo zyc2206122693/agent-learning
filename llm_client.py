@@ -309,9 +309,12 @@ class MockLLM:
             target = tools[0] if tools else None
         if target is None:
             return {"content": [{"type": "text", "text": "mock: 无工具"}]}
-        # 分类工具用启发式填枚举；其他工具按 schema 填合法参数，保证离线能真实执行
-        if "classify" in target.get("name", ""):
+        # 分类工具用启发式填枚举；路由工具按关键词判意图；其他工具按 schema 填合法参数
+        name = target.get("name", "")
+        if "classify" in name:
             tool_input = self._classify_heuristic(user_text)
+        elif "route" in name or "intent" in name:
+            tool_input = {"intents": self._route_heuristic(user_text)}
         else:
             tool_input = self._mock_args(target)
         return {
@@ -320,6 +323,17 @@ class MockLLM:
             ],
             "stop_reason": "tool_use",
         }
+
+    @staticmethod
+    def _route_heuristic(text: str) -> List[str]:
+        """mock 用的意图启发式：据关键词判断需要持仓/新闻。"""
+        news_kw = any(k in text for k in ["新闻", "行情", "快讯", "动态", "走势", "涨跌", "关注"])
+        hold_kw = any(k in text for k in ["持仓", "组合", "基金", "市值", "收益", "加仓", "减仓", "值多少"])
+        if news_kw and hold_kw:
+            return ["holdings", "news"]
+        if news_kw:
+            return ["news"]
+        return ["holdings"]
 
     @staticmethod
     def _mock_args(tool_def: Dict[str, Any]) -> Dict[str, Any]:
