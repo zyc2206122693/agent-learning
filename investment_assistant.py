@@ -65,8 +65,8 @@ def _calc(f: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def build_registry() -> ToolRegistry:
-    reg = ToolRegistry()
+def build_all_tools() -> List[Tool]:
+    """构造全部 4 个真数据工具，返回列表（供单 Agent 或多 Agent 按角色拆分复用）。"""
 
     # --- 工具 1：组合总览 ---
     def portfolio_summary() -> Dict[str, Any]:
@@ -100,13 +100,6 @@ def build_registry() -> ToolRegistry:
             "themes": theme_list,
         }
 
-    reg.register(Tool(
-        name="get_portfolio_summary",
-        description="查询整个基金组合的总览：总市值、累计投入、总收益/收益率、以及各方向模块(纳指100/A股科技/稳健固收/观察停投)的只数、市值和收益率。",
-        input_schema={"type": "object", "properties": {}},
-        executor=portfolio_summary,
-    ))
-
     # --- 工具 2：单只基金详情 ---
     def fund_detail(code: str) -> Dict[str, Any]:
         funds = (load_funds() or {}).get("funds", [])
@@ -114,17 +107,6 @@ def build_registry() -> ToolRegistry:
             if f.get("code") == code:
                 return _calc(f)
         return {"error": f"未找到代码为 {code} 的基金", "known_codes": [f["code"] for f in funds][:20]}
-
-    reg.register(Tool(
-        name="get_fund_detail",
-        description="按 6 位基金代码查询某只基金详情：当前市值、累计投入、收益/收益率、定投状态。代码错误会返回已知代码列表。",
-        input_schema={
-            "type": "object",
-            "properties": {"code": {"type": "string", "description": "6位基金代码，如 040046"}},
-            "required": ["code"],
-        },
-        executor=fund_detail,
-    ))
 
     # --- 工具 3：按方向模块查持仓 ---
     def funds_by_theme(theme: str) -> List[Dict[str, Any]]:
@@ -134,17 +116,6 @@ def build_registry() -> ToolRegistry:
         if theme != "全部":
             funds = [f for f in funds if f.get("theme") == theme]
         return [_calc(f) for f in funds]
-
-    reg.register(Tool(
-        name="list_funds_by_theme",
-        description="按方向模块查询该模块下所有持仓基金的明细（代码/市值/投入/收益/收益率）。theme 可选 纳指100/A股科技/稳健固收/观察停投/全部。",
-        input_schema={
-            "type": "object",
-            "properties": {"theme": {"type": "string", "enum": THEMES, "description": "方向模块"}},
-            "required": ["theme"],
-        },
-        executor=funds_by_theme,
-    ))
 
     # --- 工具 4：查真新闻 ---
     def news(related: str, limit: int = 5) -> Dict[str, Any]:
@@ -162,20 +133,34 @@ def build_registry() -> ToolRegistry:
         } for it in items[: max(1, min(limit, 10))]]
         return {"count": len(rows), "items": rows}
 
-    reg.register(Tool(
-        name="get_news",
-        description="查询最新财经快讯，可按关联方向过滤(纳指/AI 主题/机器人/制造业/资源/债券 或 全部)。返回时间、情绪(利好/利空/中性)、分类和标题。",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "related": {"type": "string", "enum": ["全部"] + RELATED_LABELS, "description": "关联方向"},
-                "limit": {"type": "integer", "description": "最多返回条数，默认5"},
-            },
-            "required": ["related"],
-        },
-        executor=news,
-    ))
+    return [
+        Tool(name="get_portfolio_summary",
+             description="查询整个基金组合的总览：总市值、累计投入、总收益/收益率、以及各方向模块(纳指100/A股科技/稳健固收/观察停投)的只数、市值和收益率。",
+             input_schema={"type": "object", "properties": {}},
+             executor=portfolio_summary),
+        Tool(name="get_fund_detail",
+             description="按 6 位基金代码查询某只基金详情：当前市值、累计投入、收益/收益率、定投状态。代码错误会返回已知代码列表。",
+             input_schema={"type": "object", "properties": {"code": {"type": "string", "description": "6位基金代码，如 040046"}}, "required": ["code"]},
+             executor=fund_detail),
+        Tool(name="list_funds_by_theme",
+             description="按方向模块查询该模块下所有持仓基金的明细（代码/市值/投入/收益/收益率）。theme 可选 纳指100/A股科技/稳健固收/观察停投/全部。",
+             input_schema={"type": "object", "properties": {"theme": {"type": "string", "enum": THEMES, "description": "方向模块"}}, "required": ["theme"]},
+             executor=funds_by_theme),
+        Tool(name="get_news",
+             description="查询最新财经快讯，可按关联方向过滤(纳指/AI 主题/机器人/制造业/资源/债券 或 全部)。返回时间、情绪(利好/利空/中性)、分类和标题。",
+             input_schema={"type": "object",
+                           "properties": {"related": {"type": "string", "enum": ["全部"] + RELATED_LABELS, "description": "关联方向"},
+                                          "limit": {"type": "integer", "description": "最多返回条数，默认5"}},
+                           "required": ["related"]},
+             executor=news),
+    ]
 
+
+def build_registry() -> ToolRegistry:
+    """单 Agent 版：把全部工具注册进一个 registry。"""
+    reg = ToolRegistry()
+    for t in build_all_tools():
+        reg.register(t)
     return reg
 
 
