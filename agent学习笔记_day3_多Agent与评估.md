@@ -92,4 +92,101 @@
 
 ---
 
+## 七、`multi_agent.py` 代码详解
+
+**顶层数据流**：用户问句 → ① 协调器路由 → ② 各专家（每意图一个 run_tool_loop）→ ③ 收敛合成。
+
+### ① 协调器 `route_intents()`（意图路由）
+```python
+ROUTE_TOOL = Tool("route_intent", input_schema={"intents": {"enum": ["holdings","news"]}}, ...)
+ROUTE_CHOICE = {"type": "tool", "name": "route_intent"}   # 强制走结构化输出
+
+def route_intents(question, client):
+    resp = client.complete(system=ROUTE_SYSTEM, messages=[user question],
+                           tools=[ROUTE_TOOL], tool_choice=ROUTE_CHOICE, ...)
+    # 解析 tool_use 的 input，_coerce_intents 过滤非法/去重/空则默认 ["holdings"]
+```
+- **复用第 1 课"强制结构化输出"的套路**：路由本质就是一个分类问题。
+- 用 `tool_choice: tool` 强制模型走 `route_intent` 工具 → 返回的一定是合法枚举，不会随口编。
+- `_coerce_intents()` 兜底：过滤枚举外值、去重、空 → `["holdings"]`。
+
+### ② 专家 `run_expert()` / `_expert_registry()`
+```python
+EXPERTS = {
+    "holdings": {"system": "你是基金持仓顾问...", "tools": ["get_portfolio_summary","get_fund_detail","list_funds_by_theme"]},
+    "news":     {"system": "你是金融新闻研究员...", "tools": ["get_news"]},
+}
+def _expert_registry(intent):
+    return 从 build_all_tools() 里只注册 EXPERTS[intent]["tools"] 的工具
+def run_expert(intent, question, client):
+    return client.run_tool_loop(_expert_registry(intent), system=EXPERTS[intent]["system"],
+                                tool_choice={"type": "auto"}, ...)
+```
+- **每个专家"只见自己的工具"** → 上下文更小、更专注、不易误调。
+- **每个专家有独立 system prompt 定义角色**；同一个 `run_tool_loop` 骨架，换工具子集 + 换系统提示 = 不同 Agent。
+
+### ③ 收敛 `synthesize()`
+```python
+if len(expert_results) == 1: return 直接用
+else: 把各专家 final_text 拼接 → 再调一次 LLM 让"总结者"合并成连贯回答
+```
+- 一个专家直接返回（省调用）；多个专家由收敛 Agent 合并成**一份有逻辑的回答**。
+- 这就是面试"多 Agent 结果怎么传、谁负责汇总"的答案。
+
+### ④ `ask()` 编排入口
+`route_intents → [run_expert for each intent] → synthesize`。注意专家是**串行**跑的（列表推导），互相独立的专家其实可并发优化（呼应 Q4 并发话题）。
+
+### 单 Agent vs 多 Agent（为什么值得拆）
+| | 单 Agent(第2课) | 多 Agent(第3课) |
+|---|---|---|
+| 工具 | 全塞给一个 | 每个只见子集 |
+| 上下文 | 大而全 | 更小更专注 |
+| 分工 | 一个角色 | 顾问/研究员/总结者各司其职 |
+| 误调风险 | 高 | 低 |
+| 成本 | 少 | 多（每专家调 LLM） |
+> 拆的代价是成本，收益是专注与可靠 → **先单 Agent，角色差异真正需要时才拆**。
+
+---
+
+## 八、`evaluate.py` 代码详解
+
+**测的就是协调器 `route_intents` 的路由决策**。
+```python
+TEST_CASES = [ {"q": "...", "expected": ["holdings"]}, ... ]   # (问题, 期望意图)
+
+def main():
+    if not --real: os.environ["USE_LLM"]="0"   # 默认 mock，不烧钱
+    for case in TEST_CASES:
+        pred = route_intents(case["q"], client)
+        ok = sorted(pred) == sorted(case["expected"])   # 顺序无关、精确匹配
+        PASS/FAIL
+    # 全过才 exit 0
+```
+
+**为什么测路由、不测专家回答？**
+- 自由文本输出**无法稳定断言**（两种说法都对）；结构化决策（意图）**确定、便宜、可断言**。
+- Agent 评测核心思路：**能结构化、能确定的先测**。
+
+**mock vs --real**
+- `evaluate.py`（默认）：mock 关键词启发式路由，确定 → 验证**机制/链路**稳定，可放 CI。
+- `evaluate.py --real`：真模型 → 验证**真实路由准确率**。
+
+**评估驱动迭代（本课核心教训）**
+- 第一次 `--real` 4/5。FAIL 的是歧义问句"A股科技方向现在什么情况？" → 期望 holdings，模型路由到 news。
+- **不是模型 bug，是测试用例有歧义**（可指持仓也可指行情）。没有评估就发现不了。
+- 修正：改测试用例为无歧义（"我A股科技方向的持仓..."）→ **5/5 全过**。而不是去改模型提示词。
+
+**诚实的边界（面试主动说）**
+`evaluate.py` 只测"路由对不对"，**没测**：① 专家工具调用模式；② 最终回答质量。
+真实系统要用：**工具调用断言**（记录每轮 tool_use 比对）+ **LLM 裁判/人工评测**（自由文本打分）。
+> 能主动说出"评估覆盖到哪层、还缺哪层"，比装作全测了更加分。
+
+---
+
+## 九、面试总结（Q10 完整答案）
+
+> Agent 输出不可控，所以我分层测：**结构化决策**（意图路由）用评测集断言 + mock 确定性回归；**工具调用模式**记录每轮 tool_use 比对；**自由文本质量**用 LLM 裁判/人工评测。我的 `evaluate.py` 是第一层的落地——它真抓出过一个歧义用例，改无歧义后从 4/5 到 5/5。**Agent 也是要可回归、可评估的。**
+
+---
+
 *个人 Agent 学习笔记，非投资建议。*
