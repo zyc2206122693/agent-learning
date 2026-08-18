@@ -13,6 +13,7 @@
 | `investment_assistant.py` | 第2课：投资助理（真数据工具 + auto 自主编排） |
 | `multi_agent.py` | 第3课：多 Agent（协调器意图路由 + 专家 + 收敛） |
 | `evaluate.py` | 第3课：Agent 评测/回归集 |
+| `demo_concurrency.py` | 加固：真并发 + 每工具独立超时（Q4 落地） |
 | `agent学习笔记_day3_多Agent与评估.md` | 第 3 天学习笔记 |
 | `agent学习笔记_day2_投资助理.md` | 第 2 天学习笔记 |
 | `agent学习笔记_day1_工具调用.md` | 第 1 天学习笔记（含面试题卡） |
