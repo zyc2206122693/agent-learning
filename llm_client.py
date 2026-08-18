@@ -31,6 +31,59 @@ ANTHROPIC_VERSION = "2023-06-01"
 # 单次对话允许的工具调用轮数上限，防止死循环。
 MAX_TOOL_STEPS = 6
 
+# 每个工具的独立超时（秒）：超过则按失败回填，让模型带已有结果继续，不等死。
+DEFAULT_TOOL_TIMEOUT = 30.0
+
+
+def _execute_tool_blocks(registry, tool_use_blocks, tool_timeout: float = DEFAULT_TOOL_TIMEOUT):
+    """并发执行一组 tool_use（每个工具独立超时），返回 (user_blocks, tool_calls)。
+
+    第 1 课 Q4 的落地：把串行 for（耗时=sum）升级为并发（耗时=max）。
+    - 每个工具用一个 worker 线程，`fut.result(timeout)` 给独立超时，超时按失败回填；
+    - `executor.shutdown(wait=False)` 不等待卡住的线程 → 真正 fail-fast，不会因一个
+      挂死的工具拖垮整轮。
+    注意：卡死的工具线程会留在后台（生产环境可换进程边界隔离），但不会再阻塞主循环。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    import time
+
+    results: Dict[int, Any] = {}
+
+    def run(idx: int, block: Dict[str, Any]):
+        name, args, tid = block.get("name"), block.get("input", {}), block.get("id")
+        try:
+            res = registry.execute(name, args)
+            return (idx,
+                    {"type": "tool_result", "tool_use_id": tid,
+                     "content": json.dumps(res, ensure_ascii=False, default=str), "is_error": False},
+                    {"name": name, "args": args, "result": res})
+        except Exception as e:
+            return (idx,
+                    {"type": "tool_result", "tool_use_id": tid,
+                     "content": json.dumps({"error": str(e)}, ensure_ascii=False, default=str), "is_error": True},
+                    {"name": name, "args": args, "result": {"error": str(e)}})
+
+    executor = ThreadPoolExecutor(max_workers=len(tool_use_blocks))
+    try:
+        futures = [executor.submit(run, i, b) for i, b in enumerate(tool_use_blocks)]
+        for i, fut in enumerate(futures):
+            try:
+                idx, ub, tc = fut.result(timeout=tool_timeout)
+                results[idx] = (ub, tc)
+            except Exception:  # 超时或执行器异常 → 按失败回填
+                block = tool_use_blocks[i]
+                tid, name = block.get("id"), block.get("name")
+                ub = {"type": "tool_result", "tool_use_id": tid,
+                      "content": json.dumps({"error": f"tool timeout after {tool_timeout}s"}, ensure_ascii=False),
+                      "is_error": True}
+                tc = {"name": name, "args": block.get("input", {}), "result": {"error": "tool timeout"}}
+                results[i] = (ub, tc)
+    finally:
+        executor.shutdown(wait=False)  # 不等待卡死的线程，实现真正的 fail-fast
+
+    order = sorted(results.keys())  # 按原顺序稳定输出，便于回放
+    return [results[i][0] for i in order], [results[i][1] for i in order]
+
 
 class LLMError(Exception):
     """LLM 调用失败（无密钥 / 网络 / 上游错误）。调用方据此回退到兜底策略。"""
@@ -165,10 +218,12 @@ class LLMClient:
         model: Optional[str] = None,
         max_tokens: int = 1024,
         max_steps: int = MAX_TOOL_STEPS,
+        tool_timeout: float = DEFAULT_TOOL_TIMEOUT,
     ) -> Dict[str, Any]:
-        """Agent 编排核心骨架：LLM 决定调哪个工具 → 执行 → 结果回填，循环直到完成。
+        """Agent 编排核心骨架：LLM 决定调哪个工具 → 并发执行 → 结果回填，循环直到完成。
 
         registry: ToolRegistry 实例，用于 as_anthropic_tools() 和 execute()。
+        tool_timeout: 每个工具的独立超时秒数（并发执行，超过按失败回填）。
         返回 {final_text, transcript, steps, tool_calls}。
         """
         tools = registry.as_anthropic_tools()
@@ -202,23 +257,9 @@ class LLMClient:
                     "tool_calls": tool_calls,
                 }
 
-            # 3) 有工具调用 → 逐一执行，结果以 user 角色 + tool_result block 回填
-            user_blocks = []
-            for block in tool_use_blocks:
-                name, args, tool_use_id = block.get("name"), block.get("input", {}), block.get("id")
-                try:
-                    result = registry.execute(name, args)
-                    is_error = False
-                except Exception as e:  # 工具本身出错也要回填，让模型能自我修正
-                    result = {"error": str(e)}
-                    is_error = True
-                tool_calls.append({"name": name, "args": args, "result": result})
-                user_blocks.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "content": json.dumps(result, ensure_ascii=False, default=str),
-                    "is_error": is_error,
-                })
+            # 3) 有工具调用 → 并发执行（每工具独立超时），结果以 user 角色 + tool_result 回填
+            user_blocks, tool_calls_this = _execute_tool_blocks(registry, tool_use_blocks, tool_timeout)
+            tool_calls.extend(tool_calls_this)
             messages.append({"role": "user", "content": user_blocks})
             transcript.append({"user(tool_results)": user_blocks})
 
@@ -369,15 +410,8 @@ class MockLLM:
             if not tool_use_blocks:
                 final_text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
                 return {"final_text": final_text, "transcript": transcript, "steps": len(transcript), "tool_calls": tool_calls}
-            user_blocks = []
-            for b in tool_use_blocks:
-                try:
-                    result = registry.execute(b.get("name"), b.get("input", {}))
-                    err = False
-                except Exception as e:
-                    result = {"error": str(e)}; err = True
-                tool_calls.append({"name": b.get("name"), "args": b.get("input", {}), "result": result})
-                user_blocks.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": json.dumps(result, ensure_ascii=False, default=str), "is_error": err})
+            user_blocks, tool_calls_this = _execute_tool_blocks(registry, tool_use_blocks, DEFAULT_TOOL_TIMEOUT)
+            tool_calls.extend(tool_calls_this)
             messages.append({"role": "user", "content": user_blocks})
             transcript.append({"user(tool_results)": user_blocks})
 
