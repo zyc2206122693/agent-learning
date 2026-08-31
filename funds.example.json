@@ -1,0 +1,30 @@
+{
+  "funds": [
+    {
+      "code": "000001",
+      "name": "示例稳健基金",
+      "platform": "示例平台",
+      "type": "债券型-中长债",
+      "risk": "中低风险",
+      "amount": 6000,
+      "total_invested": 5800,
+      "investment_status": "每月 12 日 500 元",
+      "category": "稳健底仓",
+      "theme": "稳健固收",
+      "shares": 5000
+    },
+    {
+      "code": "000002",
+      "name": "示例科技基金",
+      "platform": "示例平台",
+      "type": "指数型-股票被动",
+      "risk": "R5 高风险",
+      "amount": 4000,
+      "total_invested": 4200,
+      "investment_status": "已停止定投",
+      "category": "进攻仓位",
+      "theme": "A股科技",
+      "shares": 3000
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "transactions": [
+    {
+      "date": "2026-08-30",
+      "fund_code": "000001",
+      "type": "buy",
+      "amount": 100,
+      "shares": 80,
+      "fee": 0,
+      "note": "示例定投"
+    }
+  ]
+}

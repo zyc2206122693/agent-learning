@@ -17,6 +17,10 @@
 | `agent学习笔记_day3_多Agent与评估.md` | 第 3 天学习笔记 |
 | `agent学习笔记_day2_投资助理.md` | 第 2 天学习笔记 |
 | `agent学习笔记_day1_工具调用.md` | 第 1 天学习笔记（含面试题卡） |
+| `portfolio_analysis.py` | 确定性组合分析、集中度提醒、调仓模拟与交易汇总 |
+| `fund_server.py` | 本地看板 API、组合控制台和理财聊天框 |
+| `test_portfolio_analysis.py` | 组合计算单元测试 |
+| `面试讲稿_个人理财Agent.md` | 项目架构、关键取舍和高频面试追问 |
 
 ## 运行
 
@@ -28,6 +32,12 @@ cp config.example.json config.json   # 在 config.json 里填 api_key
 python3 demo_classify.py
 # 演示：离线 mock
 python3 demo_classify.py --mock
+
+# 个人理财看板（先从 example 文件复制本地配置）
+cp funds.example.json funds.json
+cp portfolio_settings.example.json portfolio_settings.json
+cp transactions.example.json transactions.json
+python3 fund_server.py
 ```
 
 ## 技术要点

@@ -30,12 +30,12 @@ from agent_tools import Tool, ToolRegistry
 from investment_assistant import build_all_tools
 from llm_client import LLMConfig, make_client
 
-INTENTS = ["holdings", "news"]
+INTENTS = ["holdings", "planning", "news"]
 
 # --- 协调器：意图路由（结构化输出） ---
 ROUTE_TOOL = Tool(
     name="route_intent",
-    description="判断用户问题需要哪些信息：holdings=需要查基金持仓/组合/市值收益；news=需要查最新行情新闻。可同时选多个。",
+    description="判断用户问题需要哪些信息：holdings=查持仓/市值/交易；planning=分析风险、集中度或模拟调仓；news=查最新财经新闻。可同时选多个。",
     input_schema={
         "type": "object",
         "properties": {"intents": {"type": "array", "items": {"type": "string", "enum": INTENTS}, "description": "命中的意图列表"}},
@@ -50,7 +50,11 @@ ROUTE_SYSTEM = "你是路由协调器。只调用 route_intent 工具输出用�
 EXPERTS: Dict[str, Dict[str, Any]] = {
     "holdings": {
         "system": "你是用户的基金持仓顾问。回答前先调用工具读取真实持仓数据，用数据说话，不要编造。",
-        "tools": ["get_portfolio_summary", "get_fund_detail", "list_funds_by_theme"],
+        "tools": ["get_portfolio_summary", "get_fund_detail", "list_funds_by_theme", "get_transaction_summary"],
+    },
+    "planning": {
+        "system": "你是组合规划顾问。先调用工具读取真实组合并进行确定性计算。清楚说明阈值和局限，不要预测收益，也不要声称已经交易。",
+        "tools": ["analyze_portfolio", "simulate_rebalance", "get_portfolio_summary"],
     },
     "news": {
         "system": "你是金融新闻研究员。回答前先调用 get_news 查询最新快讯，基于真实新闻给出方向性判断。",
@@ -87,11 +91,11 @@ def route_intents(question: str, client: Any) -> List[str]:
 
 
 def _expert_registry(intent: str) -> ToolRegistry:
-    allowed = set(EXPERTS[intent]["tools"])
+    available = {tool.name: tool for tool in build_all_tools()}
     reg = ToolRegistry()
-    for t in build_all_tools():
-        if t.name in allowed:
-            reg.register(t)
+    for name in EXPERTS[intent]["tools"]:
+        if name in available:
+            reg.register(available[name])
     return reg
 
 

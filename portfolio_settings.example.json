@@ -1,0 +1,15 @@
+{
+  "note": "示例目标比例，请按个人情况修改。",
+  "theme_targets": {
+    "稳健固收": 60,
+    "A股科技": 30,
+    "纳指100": 5,
+    "观察停投": 5
+  },
+  "alerts": {
+    "single_fund_max_pct": 20,
+    "single_theme_max_pct": 55,
+    "high_risk_max_pct": 50,
+    "rebalance_min_amount": 100
+  }
+}

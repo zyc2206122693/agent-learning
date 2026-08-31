@@ -30,6 +30,9 @@ TEST_CASES: List[Dict[str, Any]] = [
     {"q": "纳指100方向最近有什么新闻？", "expected": ["news"]},
     {"q": "我A股科技方向的持仓现在什么情况？", "expected": ["holdings"]},
     {"q": "我持仓怎么样？纳指有什么新闻？", "expected": ["holdings", "news"]},
+    {"q": "我的组合风险怎么样？", "expected": ["holdings", "planning"]},
+    {"q": "按目标比例模拟一下调仓", "expected": ["planning"]},
+    {"q": "看看持仓风险，再结合新闻说说要关注什么", "expected": ["holdings", "planning", "news"]},
 ]
 
 

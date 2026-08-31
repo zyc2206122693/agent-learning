@@ -1,5 +1,15 @@
 # 敏感配置：API 密钥，勿入库
 config.json
+funds.json
+fund_history.json
+fund_history.*.bak.json
+fund_cache.json
+news_cache.json
+transactions.json
+portfolio_settings.json
+fund_dashboard.html
+server.log
+*.pic_hd.jpg
 
 # Python
 __pycache__/

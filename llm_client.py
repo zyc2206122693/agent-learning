@@ -349,7 +349,10 @@ class MockLLM:
         if target is None:
             target = tools[0] if tools else None
         if target is None:
-            return {"content": [{"type": "text", "text": "mock: 无工具"}]}
+            return {
+                "content": [{"type": "text", "text": f"(mock) 已汇总各部分结果：关于“{user_text[:40]}”。"}],
+                "stop_reason": "end_turn",
+            }
         # 分类工具用启发式填枚举；路由工具按关键词判意图；其他工具按 schema 填合法参数
         name = target.get("name", "")
         if "classify" in name:
@@ -367,14 +370,18 @@ class MockLLM:
 
     @staticmethod
     def _route_heuristic(text: str) -> List[str]:
-        """mock 用的意图启发式：据关键词判断需要持仓/新闻。"""
+        """mock 用的意图启发式：据关键词判断持仓/规划/新闻。"""
         news_kw = any(k in text for k in ["新闻", "行情", "快讯", "动态", "走势", "涨跌", "关注"])
         hold_kw = any(k in text for k in ["持仓", "组合", "基金", "市值", "收益", "加仓", "减仓", "值多少"])
-        if news_kw and hold_kw:
-            return ["holdings", "news"]
+        planning_kw = any(k in text for k in ["风险", "集中", "调仓", "再平衡", "目标比例", "配置", "怎么投"])
+        intents = []
+        if hold_kw:
+            intents.append("holdings")
+        if planning_kw:
+            intents.append("planning")
         if news_kw:
-            return ["news"]
-        return ["holdings"]
+            intents.append("news")
+        return intents or ["holdings"]
 
     @staticmethod
     def _mock_args(tool_def: Dict[str, Any]) -> Dict[str, Any]:

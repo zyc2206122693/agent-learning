@@ -30,6 +30,7 @@ from agent_tools import Tool, ToolRegistry
 from fund_data import load_funds
 from llm_client import LLMConfig, LLMError, MockLLM, make_client
 from news_data import get_news
+from portfolio_analysis import analyze_portfolio, simulate_rebalance, transaction_summary
 
 THEMES = ["纳指100", "A股科技", "稳健固收", "观察停投", "全部"]
 RELATED_LABELS = ["纳指", "AI 主题", "机器人", "制造业", "资源", "债券"]
@@ -37,7 +38,9 @@ RELATED_LABELS = ["纳指", "AI 主题", "机器人", "制造业", "资源", "�
 _SYSTEM_PROMPT = (
     "你是用户的个人基金投资助理。回答前，先根据问题判断需要哪些信息，调用相关工具获取真实数据，"
     "再用数据回答，不要编造数据。问题涉及：整个组合用 get_portfolio_summary；某只基金用 get_fund_detail；"
-    "某个方向模块用 list_funds_by_theme；行情/最新动态用 get_news。数据以工具返回为准。"
+    "某个方向模块用 list_funds_by_theme；风险/集中度用 analyze_portfolio；"
+    "目标仓位调整用 simulate_rebalance；历史买卖记录用 get_transaction_summary；"
+    "行情/最新动态用 get_news。数据以工具返回为准。调仓结果只是模拟，不要声称已执行交易。"
 )
 
 
@@ -153,6 +156,18 @@ def build_all_tools() -> List[Tool]:
                                           "limit": {"type": "integer", "description": "最多返回条数，默认5"}},
                            "required": ["related"]},
              executor=news),
+        Tool(name="analyze_portfolio",
+             description="分析当前组合的主题占比、单基金集中度和中高风险基金占比，并按 portfolio_settings.json 的阈值给出提醒。",
+             input_schema={"type": "object", "properties": {}},
+             executor=analyze_portfolio),
+        Tool(name="simulate_rebalance",
+             description="按照 portfolio_settings.json 中的主题目标比例，模拟各方向需要买入、卖出或保持的金额；只计算，不执行交易。",
+             input_schema={"type": "object", "properties": {}},
+             executor=simulate_rebalance),
+        Tool(name="get_transaction_summary",
+             description="汇总 transactions.json 中已登记的买入、卖出、分红、费用和净投入。",
+             input_schema={"type": "object", "properties": {}},
+             executor=transaction_summary),
     ]
 
 
@@ -164,14 +179,22 @@ def build_registry() -> ToolRegistry:
     return reg
 
 
-def ask(question: str, client: Optional[Any] = None, max_tokens: int = 800) -> Dict[str, Any]:
+def ask(question: str, client: Optional[Any] = None, max_tokens: int = 800,
+        history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
     """让投资助理回答一个自然语言问题（模型自主决定查哪些工具）。"""
     registry = build_registry()
     client = client or make_client()
+    messages: List[Dict[str, Any]] = []
+    for message in (history or [])[-8:]:
+        role = message.get("role")
+        content = message.get("content")
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            messages.append({"role": role, "content": content[:3000]})
+    messages.append({"role": "user", "content": question})
     return client.run_tool_loop(
         registry,
         system=_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": question}],
+        messages=messages,
         tool_choice={"type": "auto"},
         max_tokens=max_tokens,
     )
